@@ -128,8 +128,6 @@ def simulate_for_node(node):
             if not success:
                 print(f"⚠️ [{video_name}] 心跳失败（第 {i+1} 次）")
                 break
-
-            # ✅ 打印进度（核心）
             print(f"📊 [{video_name}] 心跳进度: {i+1}/{heartbeat_count}")
 
             if i < heartbeat_count - 1:
