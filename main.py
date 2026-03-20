@@ -16,8 +16,7 @@ API_BASE = "https://swxy.haiqikeji.com/api/"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
     "Content-Type": "application/json",
-    "Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ7XCJhdmF0YXJcIjpcIlwiLFwiY2lyY2xlQ291bnRcIjowLFwiY2l0eVwiOjAsXCJjbGFzc0lkXCI6MTAwNjU5MCxcImNvbGxlZ2VJZFwiOjEwMDAxMDUsXCJjb21wbGV0ZUNvdXJzZVwiOjAsXCJkaXNjSm9pblwiOjAsXCJkaXNjUmVwbHlcIjowLFwiZW1haWxcIjpcIlwiLFwiZW50cnlZZWFyXCI6MjAyNSxcImVycm9yQ291bnRcIjowLFwiZXJyb3JUaW1lXCI6MCxcImdlbmRlclwiOlwi55S3XCIsXCJpZFwiOjEyODM3MjksXCJpZENhcmRcIjpcIjQzMDYyNDIwMDIwODAyNjQ3MFwiLFwibW9iaWxlXCI6XCJcIixcIm5hbWVcIjpcIumZiOa2plwiLFwibnVtYmVyXCI6XCIyMDI1MDIxMjkwXCIsXCJwYXNzd29yZFwiOlwiJDJhJDEwJEh5OVpmenhsNjdHUW1wQUFnL0RCVi5LZ05XbE0zUm9JRlhKcnBtTU9URHBzd29WSC5qS3ZLXCIsXCJwb2ludFwiOjAsXCJwcm92aW5jZVwiOjAsXCJyZWdpb25cIjowLFwic2Nob29sSWRcIjoxNSxcInN0dWR5Q291cnNlXCI6MCxcInN0dWR5RHVyYXRpb25cIjowLFwidGlwUGFzc1wiOjB9IiwiaXNzIjoiZ3VvemUiLCJpYXQiOjE3NzM5NzQ1NDgsImp0aSI6IjU0YTRjYjdiLWE3MjAtNDU3Ni1hMDI2LWRlYjA1ZjRmYTBjYSIsImV4cCI6MTc3NDA2MDk0OH0.KBmC8QMekUyvnoWoM_M4ccxiwlUKr040qhC4jvbywQ0",
-    "Referer": "https://swxy.haiqikeji.com/student/course-study-record?id=1012270",
+    "Authorization": "",
     "Origin": "https://swxy.haiqikeji.com",
     "Cookie": "__root_domain_v=.haiqikeji.com; _qddaz=QD.797773064926835"
 }
