@@ -3,9 +3,12 @@
 # GitHub：https://github.com/Xnidada/haiqikeji
 # 注意事项：本脚本仅供学习和技术研究使用，请遵守相关平台的使用规定。
 # ============================================================
+
 import requests
 import time
 import re
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ================== 配置 ===================
 API_BASE = "https://swxy.haiqikeji.com/api/"
@@ -13,7 +16,7 @@ API_BASE = "https://swxy.haiqikeji.com/api/"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
     "Content-Type": "application/json",
-    "Authorization": "",
+    "Authorization": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ7XCJhdmF0YXJcIjpcIlwiLFwiY2lyY2xlQ291bnRcIjowLFwiY2l0eVwiOjAsXCJjbGFzc0lkXCI6MTAwNjU5MCxcImNvbGxlZ2VJZFwiOjEwMDAxMDUsXCJjb21wbGV0ZUNvdXJzZVwiOjAsXCJkaXNjSm9pblwiOjAsXCJkaXNjUmVwbHlcIjowLFwiZW1haWxcIjpcIlwiLFwiZW50cnlZZWFyXCI6MjAyNSxcImVycm9yQ291bnRcIjowLFwiZXJyb3JUaW1lXCI6MCxcImdlbmRlclwiOlwi55S3XCIsXCJpZFwiOjEyODM3MjksXCJpZENhcmRcIjpcIjQzMDYyNDIwMDIwODAyNjQ3MFwiLFwibW9iaWxlXCI6XCJcIixcIm5hbWVcIjpcIumZiOa2plwiLFwibnVtYmVyXCI6XCIyMDI1MDIxMjkwXCIsXCJwYXNzd29yZFwiOlwiJDJhJDEwJEh5OVpmenhsNjdHUW1wQUFnL0RCVi5LZ05XbE0zUm9JRlhKcnBtTU9URHBzd29WSC5qS3ZLXCIsXCJwb2ludFwiOjAsXCJwcm92aW5jZVwiOjAsXCJyZWdpb25cIjowLFwic2Nob29sSWRcIjoxNSxcInN0dWR5Q291cnNlXCI6MCxcInN0dWR5RHVyYXRpb25cIjowLFwidGlwUGFzc1wiOjB9IiwiaXNzIjoiZ3VvemUiLCJpYXQiOjE3NzM5NzQ1NDgsImp0aSI6IjU0YTRjYjdiLWE3MjAtNDU3Ni1hMDI2LWRlYjA1ZjRmYTBjYSIsImV4cCI6MTc3NDA2MDk0OH0.KBmC8QMekUyvnoWoM_M4ccxiwlUKr040qhC4jvbywQ0",
     "Referer": "https://swxy.haiqikeji.com/student/course-study-record?id=1012270",
     "Origin": "https://swxy.haiqikeji.com",
     "Cookie": "__root_domain_v=.haiqikeji.com; _qddaz=QD.797773064926835"
@@ -22,9 +25,13 @@ HEADERS = {
 SCHOOL_ID = 15
 USER_ID = 1283729
 COURSE_ID = 1012270
+max_workers = 10
+
+session = requests.Session()
+session.headers.update(HEADERS)
 
 
-# ================== 工具函数：解析时间字符串 ==================
+# ================== 工具函数 ==================
 def parse_duration(duration_str: str) -> int:
     if not duration_str or duration_str == "0秒":
         return 0
@@ -49,7 +56,7 @@ def get_study_progress():
         "userId": USER_ID,
         "courseId": COURSE_ID
     }
-    resp = requests.get(url, headers=HEADERS, params=params)
+    resp = session.get(url, params=params)
     print(f"[DEBUG] Get Progress Response: {resp.status_code}")
 
     if resp.status_code == 200:
@@ -69,7 +76,7 @@ def get_study_progress():
     return []
 
 
-# ================== API 函数 ==================
+# ================== API ==================
 def study_session_start(node_id: int):
     url = f"{API_BASE}/user/study_session_start"
     payload = {
@@ -79,7 +86,7 @@ def study_session_start(node_id: int):
         "nodeId": node_id,
         "terminal": "web"
     }
-    resp = requests.post(url, headers=HEADERS, json=payload)
+    resp = session.post(url, json=payload)
     if resp.status_code == 200 and resp.json().get("code") == 200:
         return resp.json().get("data")
     print("❌ 会话启动失败")
@@ -89,7 +96,7 @@ def study_session_start(node_id: int):
 def study_session_heartbeat(session_id):
     url = f"{API_BASE}/user/study_session_heartbeat"
     payload = {"sessionId": session_id}
-    resp = requests.post(url, headers=HEADERS, json=payload)
+    resp = session.post(url, json=payload)
     if resp.status_code == 200:
         try:
             data = resp.json()
@@ -103,46 +110,54 @@ def study_session_heartbeat(session_id):
 def study_session_end(session_id):
     url = f"{API_BASE}/user/study_session_end"
     payload = {"sessionId": session_id}
-    requests.post(url, headers=HEADERS, json=payload)
+    session.post(url, json=payload)
 
 
+# ================== 核心逻辑 ==================
 def simulate_for_node(node):
-    node_id = node["nodeId"]
-    video_name = node["nodeName"]
-    video_duration = parse_duration(node["videoDuration"])
-    watched_duration = parse_duration(node["watchDuration"])
-    remaining = max(0, video_duration - watched_duration)
+    try:
+        node_id = node["nodeId"]
+        video_name = node["nodeName"]
+        video_duration = parse_duration(node["videoDuration"])
+        watched_duration = parse_duration(node["watchDuration"])
+        remaining = max(0, video_duration - watched_duration)
 
-    if remaining <= 0:
-        remaining = 60
+        if remaining <= 0:
+            remaining = 60
 
-    print(f"\n🎯 正在处理: {video_name}")
-    print(f"   nodeId: {node_id} | 还需约 {remaining} 秒")
+        print(f"\n🎯 正在处理: {video_name}")
+        print(f"   nodeId: {node_id} | 还需约 {remaining} 秒")
 
-    session_id = study_session_start(node_id)
-    if not session_id:
-        print("⚠️ 跳过该视频")
-        return
+        session_id = study_session_start(node_id)
+        if not session_id:
+            print("⚠️ 跳过该视频")
+            return
 
-    # 第一次心跳前等 11 秒
-    time.sleep(11)
+        # 首次延迟
+        time.sleep(10 + random.uniform(0.5, 2))
 
-    # 计算心跳次数：每 11 秒一次
-    heartbeat_count = max(2, (remaining // 11) + 1)
-    print(f"   💓 计划发送 {heartbeat_count} 次心跳（间隔11秒）")
+        heartbeat_count = max(2, (remaining // 11) + 1)
+        print(f"   💓 计划发送 {heartbeat_count} 次心跳")
 
-    for i in range(heartbeat_count):
-        success = study_session_heartbeat(session_id)
-        if not success:
-            print("⚠️ 心跳失败，跳过")
-            break
-        if i < heartbeat_count - 1:
-            time.sleep(11)
+        for i in range(heartbeat_count):
+            success = study_session_heartbeat(session_id)
+            if not success:
+                print(f"⚠️ [{video_name}] 心跳失败（第 {i+1} 次）")
+                break
 
-    study_session_end(session_id)
-    print(f"✅ 完成: {video_name}")
+            # ✅ 打印进度（核心）
+            print(f"📊 [{video_name}] 心跳进度: {i+1}/{heartbeat_count}")
 
-# ================== 主流程：遍历所有未完成视频 ==================
+            if i < heartbeat_count - 1:
+                time.sleep(10 + random.uniform(0.5, 2))
+
+        study_session_end(session_id)
+        print(f"✅ 完成: {video_name}")
+
+    except Exception as e:
+        print(f"❌ 处理异常: {e}")
+
+# ================== 多线程入口 ==================
 def simulate_all_incomplete():
     print("🔍 正在获取课程学习进度...")
     incomplete_nodes = get_study_progress()
@@ -151,14 +166,20 @@ def simulate_all_incomplete():
         print("🎉 所有视频已完成！")
         return
 
-    print(f"\n🚀 总共 {len(incomplete_nodes)} 个视频待完成，开始自动刷课...\n")
+    print(f"\n🚀 总共 {len(incomplete_nodes)} 个视频待完成，开始并发刷课...\n")
 
-    for idx, node in enumerate(incomplete_nodes, 1):
-        print(f"\n[{idx}/{len(incomplete_nodes)}]")
-        simulate_for_node(node)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(simulate_for_node, node) for node in incomplete_nodes]
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"❌ 线程异常: {e}")
 
     print("\n🎉 所有未完成视频已处理完毕！")
 
 
+# ================== 启动 ==================
 if __name__ == "__main__":
     simulate_all_incomplete()
