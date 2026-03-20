@@ -110,7 +110,7 @@ def simulate_for_node(node):
             remaining = 60
 
         print(f"\n🎯 正在处理: {video_name}")
-        print(f"   nodeId: {node_id} | 还需约 {remaining} 秒")
+        print(f"   nodeId: {node_id} | 还需约 {video_duration}-{watched_duration}={remaining} 秒")
 
         session_id = study_session_start(node_id)
         if not session_id:
