@@ -16,6 +16,6 @@ USER_ID =
 # 课程ID
 COURSE_ID =
 # 线程数
-MAX_WORKERS =
+MAX_WORKERS = 10
 
 # 上述所有内容都可在学习成绩界面抓包获取
