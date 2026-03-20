@@ -9,7 +9,7 @@ HEADERS = {
     "Cookie": "__root_domain_v=.haiqikeji.com; _qddaz=QD.797773064926835"
 }
 
-# 学习ID
+# 学校ID
 SCHOOL_ID = 15
 # 用户ID
 USER_ID =
