@@ -9,21 +9,7 @@ import re
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ================== 配置 ===================
-API_BASE = "https://swxy.haiqikeji.com/api/"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
-    "Content-Type": "application/json",
-    "Authorization": "",
-    "Origin": "https://swxy.haiqikeji.com",
-    "Cookie": "__root_domain_v=.haiqikeji.com; _qddaz=QD.797773064926835"
-}
-
-SCHOOL_ID = 15
-USER_ID = 1283729
-COURSE_ID = 1012270
-max_workers = 10
+from config import API_BASE, HEADERS, SCHOOL_ID, USER_ID, COURSE_ID, MAX_WORKERS
 
 session = requests.Session()
 session.headers.update(HEADERS)
@@ -164,9 +150,10 @@ def simulate_all_incomplete():
         print("🎉 所有视频已完成！")
         return
 
-    print(f"\n🚀 总共 {len(incomplete_nodes)} 个视频待完成，开始并发刷课...\n")
+    actual_workers = min(MAX_WORKERS, len(incomplete_nodes))
+    print(f"\n🚀 总共 {len(incomplete_nodes)} 个视频待完成，使用 {actual_workers} 个线程并发刷课...\n")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=actual_workers) as executor:
         futures = [executor.submit(simulate_for_node, node) for node in incomplete_nodes]
 
         for future in as_completed(futures):
@@ -176,7 +163,6 @@ def simulate_all_incomplete():
                 print(f"❌ 线程异常: {e}")
 
     print("\n🎉 所有未完成视频已处理完毕！")
-
 
 # ================== 启动 ==================
 if __name__ == "__main__":
