@@ -19,7 +19,7 @@ NUMBER = ""
 PASSWORD = ""
 
 # 课程ID（支持多个，为空则自动获取所有未过期课程）
-COURSE_IDS = [1012329,1012308]
+COURSE_IDS = [1012365,1012305]
 
 # 线程数
 MAX_WORKERS = 10
@@ -34,9 +34,10 @@ def login():
     if data.get("code") != 200:
         raise Exception(f"登录失败: {data.get('msg')}")
     token = data["data"]
-    payload = json.loads(base64.b64decode(token.split('.')[1] + '==').decode('utf-8'))
-    user_info = json.loads(payload["sub"])
-    return token, user_info["id"]
+    import re
+    raw = base64.b64decode(token.split('.')[1] + '==').decode('latin-1')
+    user_id = int(re.search(r'\\?"id\\?"\s*:\s*(\d+)', raw).group(1))
+    return token, user_id
 
 
 def fetch_course_ids(token, user_id):
