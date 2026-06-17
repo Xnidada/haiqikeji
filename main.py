@@ -9,10 +9,14 @@ import re
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import API_BASE, HEADERS, SCHOOL_ID, USER_ID, COURSE_ID, MAX_WORKERS
+from config import API_BASE, HEADERS, SCHOOL_ID, COURSE_IDS, MAX_WORKERS, login, fetch_course_ids
+
+token, USER_ID = login()
+print(f"✅ 登录成功 | userId: {USER_ID}")
 
 session = requests.Session()
 session.headers.update(HEADERS)
+session.headers["Authorization"] = token
 
 
 # ================== 工具函数 ==================
@@ -32,13 +36,39 @@ def parse_duration(duration_str: str) -> int:
     return total_seconds
 
 
+def parse_duration_v2(duration_str: str) -> int:
+    if not duration_str or duration_str == "0秒":
+        return 0
+    total_seconds = 0
+    h_match = re.search(r'(\d+)\s*小时', duration_str)
+    if h_match:
+        total_seconds += int(h_match.group(1)) * 3600
+    m_match = re.search(r'(\d+)\s*分', duration_str)
+    if m_match:
+        total_seconds += int(m_match.group(1)) * 60
+    s_match = re.search(r'(\d+)\s*秒', duration_str)
+    if s_match:
+        total_seconds += int(s_match.group(1))
+    return total_seconds
+
+
+def get_duration(duration_str: str) -> int:
+    result = parse_duration_v2(duration_str)
+    if result > 0:
+        return result
+    result = parse_duration(duration_str)
+    if result > 0:
+        print(f"   ⚠️ 备用方法解析失败，原方法解析成功: {duration_str} -> {result}秒")
+    return result
+
+
 # ================== 获取学习进度 ==================
-def get_study_progress():
+def get_study_progress(course_id):
     url = f"{API_BASE}/user/get_study_progress"
     params = {
         "schoolId": SCHOOL_ID,
         "userId": USER_ID,
-        "courseId": COURSE_ID
+        "courseId": course_id
     }
     resp = session.get(url, params=params)
     print(f"[DEBUG] Get Progress Response: {resp.status_code}")
@@ -61,12 +91,12 @@ def get_study_progress():
 
 
 # ================== API ==================
-def study_session_start(node_id: int):
+def study_session_start(node_id: int, course_id):
     url = f"{API_BASE}/user/study_session_start"
     payload = {
         "schoolId": SCHOOL_ID,
         "userId": USER_ID,
-        "courseId": COURSE_ID,
+        "courseId": course_id,
         "nodeId": node_id,
         "terminal": "web"
     }
@@ -98,12 +128,13 @@ def study_session_end(session_id):
 
 
 # ================== 核心逻辑 ==================
-def simulate_for_node(node):
+def simulate_for_node(node, course_id):
     try:
         node_id = node["nodeId"]
         video_name = node["nodeName"]
-        video_duration = parse_duration(node["videoDuration"])
-        watched_duration = parse_duration(node["watchDuration"])
+        video_duration = get_duration(node["videoDuration"])
+        watched_duration = get_duration(node["watchDuration"])
+        #remaining = 3600
         remaining = max(0, video_duration - watched_duration)
 
         if remaining <= 0:
@@ -112,7 +143,7 @@ def simulate_for_node(node):
         print(f"\n🎯 正在处理: {video_name}")
         print(f"   nodeId: {node_id} | 还需约 {video_duration}-{watched_duration}={remaining} 秒")
 
-        session_id = study_session_start(node_id)
+        session_id = study_session_start(node_id, course_id)
         if not session_id:
             print("⚠️ 跳过该视频")
             return
@@ -140,19 +171,22 @@ def simulate_for_node(node):
         print(f"❌ 处理异常: {e}")
 
 # ================== 多线程入口 ==================
-def simulate_all_incomplete():
+def process_course(course_id):
+    print(f"\n{'='*50}")
+    print(f"📚 开始处理课程: {course_id}")
+    print(f"{'='*50}")
     print("🔍 正在获取课程学习进度...")
-    incomplete_nodes = get_study_progress()
+    incomplete_nodes = get_study_progress(course_id)
 
     if not incomplete_nodes:
-        print("🎉 所有视频已完成！")
+        print(f"🎉 课程 {course_id} 所有视频已完成！")
         return
 
     actual_workers = min(MAX_WORKERS, len(incomplete_nodes))
-    print(f"\n🚀 总共 {len(incomplete_nodes)} 个视频待完成，使用 {actual_workers} 个线程并发刷课...\n")
+    print(f"\n🚀 课程 {course_id}: 共 {len(incomplete_nodes)} 个视频待完成，使用 {actual_workers} 个线程并发刷课...\n")
 
     with ThreadPoolExecutor(max_workers=actual_workers) as executor:
-        futures = [executor.submit(simulate_for_node, node) for node in incomplete_nodes]
+        futures = [executor.submit(simulate_for_node, node, course_id) for node in incomplete_nodes]
 
         for future in as_completed(futures):
             try:
@@ -160,7 +194,34 @@ def simulate_all_incomplete():
             except Exception as e:
                 print(f"❌ 线程异常: {e}")
 
-    print("\n🎉 所有未完成视频已处理完毕！")
+    print(f"\n🎉 课程 {course_id} 所有未完成视频已处理完毕！")
+
+
+# ================== 多课程并发入口 ==================
+def simulate_all_incomplete():
+    course_ids = COURSE_IDS
+    if not course_ids:
+        print("🔍 未配置课程ID，自动获取未过期课程...")
+        course_ids = fetch_course_ids(token, USER_ID)
+        if not course_ids:
+            print("❌ 没有找到未过期的课程")
+            return
+        print(f"📚 自动获取到 {len(course_ids)} 个未过期课程: {course_ids}")
+
+    print(f"📚 共 {len(course_ids)} 个课程待处理: {course_ids}")
+
+    if len(course_ids) == 1:
+        process_course(course_ids[0])
+    else:
+        with ThreadPoolExecutor(max_workers=len(course_ids)) as executor:
+            futures = [executor.submit(process_course, cid) for cid in course_ids]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"❌ 课程处理异常: {e}")
+
+    print("\n🎉 所有课程处理完毕！")
 
 # ================== 启动 ==================
 if __name__ == "__main__":
