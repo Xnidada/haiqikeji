@@ -13,22 +13,29 @@ HEADERS = {
 
 # 学校ID
 SCHOOL_ID = 15
-# 登入账号
-NUMBER = ""
-# 登入密码
-PASSWORD = ""
 
-# 课程ID（支持多个，为空则自动获取所有未过期课程）
-COURSE_IDS = [1012365,1012305]
+# 账号列表（支持多个账号同时刷课）
+ACCOUNTS = [
+    {
+        "number": "",
+        "password": "",
+        "course_ids": [1012365,1012305],
+    },
+    # {
+    #     "number": "",
+    #     "password": "",
+    #     "course_ids": [1012366],
+    # },
+]
 
-# 线程数
-MAX_WORKERS = 10
+# 线程数（每个课程的并发线程数）
+MAX_WORKERS = 15
 
 
-def login():
+def login(number, password):
     resp = requests.get(
         f"{API_BASE}user/login",
-        params={"number": NUMBER, "password": PASSWORD, "schoolId": SCHOOL_ID}
+        params={"number": number, "password": password, "schoolId": SCHOOL_ID}
     )
     data = resp.json()
     if data.get("code") != 200:
