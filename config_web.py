@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import pprint
 import re
 import subprocess
@@ -15,11 +16,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from cryptography.fernet import Fernet
+
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "config.py"
 MAIN_PATH = ROOT / "main.py"
 START_MARKER = "# === FRONTEND CONFIG START ==="
 END_MARKER = "# === FRONTEND CONFIG END ==="
+SECRET_KEY_PATH = ROOT / "config.secret.key"
 
 _process: subprocess.Popen[str] | None = None
 _process_lock = threading.Lock()
@@ -38,6 +42,39 @@ def _read_config() -> dict[str, Any]:
             if isinstance(target, ast.Name) and target.id in wanted:
                 values[target.id] = ast.literal_eval(node.value)
     return values
+
+
+def _public_config() -> dict[str, Any]:
+    values = _read_config()
+    accounts = []
+    for account in values.get("ACCOUNTS", []):
+        accounts.append(
+            {
+                "number": account.get("number", ""),
+                "course_ids": account.get("course_ids", []),
+                "password_configured": bool(account.get("password_encrypted") or account.get("password")),
+            }
+        )
+    values["ACCOUNTS"] = accounts
+    return values
+
+
+def _get_fernet() -> Fernet:
+    if not SECRET_KEY_PATH.exists():
+        key = Fernet.generate_key()
+        try:
+            fd = os.open(SECRET_KEY_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd, "wb") as key_file:
+                key_file.write(key)
+    SECRET_KEY_PATH.chmod(0o600)
+    return Fernet(SECRET_KEY_PATH.read_bytes().strip())
+
+
+def _encrypt_password(password: str) -> str:
+    return _get_fernet().encrypt(password.encode()).decode() if password else ""
 
 
 def _validate_config(values: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +104,25 @@ def _validate_config(values: dict[str, Any]) -> dict[str, Any]:
 
 def _save_config(values: dict[str, Any]) -> None:
     values = _validate_config(values)
+    current_accounts = _read_config().get("ACCOUNTS", [])
+    old_by_number = {account.get("number"): account for account in current_accounts}
+    accounts = []
+    for account in values["ACCOUNTS"]:
+        old_account = old_by_number.get(account["number"], {})
+        password = account.get("password", "")
+        encrypted_password = _encrypt_password(password)
+        if not encrypted_password:
+            encrypted_password = old_account.get("password_encrypted", "")
+            if not encrypted_password and old_account.get("password"):
+                encrypted_password = _encrypt_password(old_account["password"])
+        accounts.append(
+            {
+                "number": account["number"],
+                "password_encrypted": encrypted_password,
+                "course_ids": account.get("course_ids", []),
+            }
+        )
+    values["ACCOUNTS"] = accounts
     source = CONFIG_PATH.read_text(encoding="utf-8")
     pattern = re.compile(re.escape(START_MARKER) + r".*?" + re.escape(END_MARKER), re.S)
     if not pattern.search(source):
@@ -145,51 +201,132 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>海奇科技配置控制台</title>
+<title>海奇科技 · 控制台</title>
 <style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#f5f7fb}
-body{max-width:1000px;margin:32px auto;padding:0 16px}h1{font-size:26px;margin-bottom:8px}.hint{color:#667085}
-.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin:16px 0;box-shadow:0 2px 8px #1720330d}
-label{display:block;font-weight:600;margin:12px 0 6px}input,textarea{box-sizing:border-box;width:100%;font:inherit;border:1px solid #d0d5dd;border-radius:8px;padding:9px}textarea{min-height:130px;resize:vertical;font-family:ui-monospace,SFMono-Regular,monospace;font-size:13px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600}button.primary{background:#2563eb;color:#fff}button.danger{background:#dc2626;color:#fff}button.secondary{background:#e5e7eb;color:#172033}#message{min-height:22px;margin-top:10px}.ok{color:#15803d}.error{color:#b91c1c}pre{background:#101828;color:#d1fadf;border-radius:8px;padding:14px;min-height:220px;max-height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word}
-@media(max-width:700px){.grid{grid-template-columns:1fr}}
+:root{
+  color-scheme:light;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  color:#172033;
+  background:#f3f6fb;
+  -webkit-font-smoothing:antialiased;
+  --ink:#172033;
+  --muted:#667085;
+  --faint:#98a2b3;
+  --line:#e4e7ec;
+  --surface:#ffffff;
+  --surface-soft:#f8fafc;
+  --accent:#2f6fed;
+  --accent-strong:#2158c8;
+  --danger:#c4324b;
+  --shadow:0 18px 48px rgba(16,24,40,.08),0 2px 8px rgba(16,24,40,.04);
+}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px;background:radial-gradient(circle at 8% 0%,#eaf2ff 0,transparent 34rem),var(--surface-soft);color:var(--ink)}
+button,input,textarea{font:inherit}
+button{min-height:44px;border:0;border-radius:12px;padding:0 16px;cursor:pointer;font-weight:700;transition-property:transform,background-color,border-color,box-shadow,color,opacity;transition-duration:160ms;transition-timing-function:cubic-bezier(.2,0,0,1)}
+button:active{transform:scale(.96)}
+button:focus-visible{outline:3px solid rgba(47,111,237,.28);outline-offset:2px}
+button:disabled{cursor:wait;opacity:.62}
+input,textarea{width:100%;border:1px solid #d0d5dd;border-radius:12px;background:#fff;color:var(--ink);padding:11px 13px;outline:0;transition-property:border-color,box-shadow,background-color;transition-duration:160ms;transition-timing-function:cubic-bezier(.2,0,0,1)}
+input{min-height:44px}
+textarea{min-height:148px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.55}
+input::placeholder,textarea::placeholder{color:#98a2b3}
+input:focus,textarea:focus{border-color:#78a4f5;box-shadow:0 0 0 4px rgba(47,111,237,.13);background:#fcfdff}
+.shell{max-width:1160px;margin:0 auto;padding:40px 22px 32px}
+.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin-bottom:26px}
+.eyebrow,.section-kicker{margin:0;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+h1{max-width:680px;margin:8px 0 8px;font-size:clamp(28px,4vw,42px);line-height:1.08;letter-spacing:-.035em;text-wrap:balance}
+.subtitle{max-width:680px;margin:0;color:var(--muted);font-size:15px;line-height:1.65;text-wrap:pretty}
+.status-pill{display:flex;align-items:center;gap:9px;min-height:40px;padding:0 13px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.8);color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(16,24,40,.04)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#98a2b3;box-shadow:0 0 0 4px rgba(152,162,179,.16)}
+.status-pill.running{border-color:#b7e4c7;color:#167447;background:#f3fcf6}.status-pill.running .status-dot{background:#17a673;box-shadow:0 0 0 4px rgba(23,166,115,.14)}
+.status-pill.error{border-color:#f3c3cb;color:var(--danger);background:#fff7f8}.status-pill.error .status-dot{background:#d92d49;box-shadow:0 0 0 4px rgba(217,45,73,.14)}
+.layout{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(340px,.82fr);gap:20px;align-items:start}
+.card{min-width:0;border:1px solid rgba(228,231,236,.84);border-radius:24px;background:rgba(255,255,255,.94);padding:24px;box-shadow:var(--shadow)}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.section-kicker{color:var(--faint);font-size:10px}
+h2{margin:5px 0 5px;font-size:19px;line-height:1.25;letter-spacing:-.015em}h3{margin:0;font-size:14px} .section-copy{margin:0;color:var(--muted);font-size:13px;line-height:1.55;text-wrap:pretty}
+.field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.field{min-width:0}.field-wide{grid-column:1/-1}
+label{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 0 7px;font-size:13px;font-weight:750}.field-help{color:var(--faint);font-size:11px;font-weight:500}
+.section-divider{height:1px;margin:26px 0;background:var(--line)}
+.account-list{display:grid;gap:12px}.account-row{border:1px solid var(--line);border-radius:16px;background:var(--surface-soft);padding:16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+.account-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) auto;gap:12px;align-items:end}.account-row label{margin-top:0}.password-hint{min-height:18px;margin-top:5px;color:var(--muted);font-size:11px;line-height:1.4}.remove-account{background:#fff0f2;color:#a1293d}.remove-account:hover{background:#ffe3e7}.empty-state{border:1px dashed #cfd7e5;border-radius:16px;padding:20px;text-align:center;color:var(--muted);font-size:13px;background:#fbfcfe}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}.actions-secondary{margin-top:12px}.primary{background:var(--accent);color:#fff;box-shadow:0 7px 16px rgba(47,111,237,.22)}.primary:hover{background:var(--accent-strong);box-shadow:0 9px 20px rgba(47,111,237,.27)}.secondary{background:#eef2f7;color:#344054}.secondary:hover{background:#e4e9f1}.danger{background:#fff0f2;color:#a1293d}.danger:hover{background:#ffe3e7}.ghost{background:transparent;color:var(--muted);padding-inline:10px}.ghost:hover{background:#f2f4f7;color:var(--ink)}
+#message{min-height:22px;margin:12px 0 0;color:var(--muted);font-size:13px}#message.ok{color:#167447}#message.error{color:var(--danger)}
+.logs-card{position:sticky;top:20px}.log-tools{display:flex;align-items:center;gap:8px;color:var(--faint);font-size:11px;font-variant-numeric:tabular-nums}.log-tools .log-count{padding:4px 8px;border-radius:999px;background:#f2f4f7;color:var(--muted)}pre{min-height:520px;max-height:calc(100vh - 220px);margin:0;border-radius:16px;background:#111827;color:#d1fadf;padding:16px;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;box-shadow:inset 0 1px 2px rgba(0,0,0,.25)}
+.footer{margin-top:16px;color:var(--faint);font-size:12px;text-align:center}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.logs-card{position:static}.log-tools{margin-top:2px}}
+@media(max-width:680px){.shell{padding:24px 14px}.topbar{display:block}.status-pill{display:inline-flex;margin-top:18px}.card{padding:18px;border-radius:20px}.field-grid,.account-grid{grid-template-columns:1fr}pre{min-height:320px;max-height:55vh}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition-duration:0ms!important}}
 </style>
 </head>
 <body>
-<h1>海奇科技配置控制台</h1>
-<p class="hint">填写配置后保存；启动按钮会运行当前目录的 <code>main.py</code>。</p>
-<div class="card">
-  <div class="grid">
-    <div><label for="apiBase">API_BASE</label><input id="apiBase"></div>
-    <div><label for="schoolId">SCHOOL_ID</label><input id="schoolId" type="number"></div>
-    <div><label for="maxWorkers">MAX_WORKERS</label><input id="maxWorkers" type="number" min="1"></div>
+<main class="shell">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Local control console</p>
+      <h1>海奇科技配置控制台</h1>
+      <p class="subtitle">集中管理运行参数、账号和课程，并在同一个页面启动任务与查看日志。</p>
+    </div>
+    <div id="serviceStatus" class="status-pill" aria-live="polite"><span class="status-dot"></span><span id="serviceStatusText">检查中...</span></div>
+  </header>
+
+  <div class="layout">
+    <section class="card" aria-labelledby="config-title">
+      <div class="card-head">
+        <div><p class="section-kicker">01 · Runtime</p><h2 id="config-title">运行配置</h2><p class="section-copy">修改后点击保存；启动按钮会先保存当前表单，再运行 <code>main.py</code>。</p></div>
+      </div>
+      <div class="field-grid">
+        <div class="field field-wide"><label for="apiBase">API 地址<span class="field-help">API_BASE</span></label><input id="apiBase" autocomplete="url"></div>
+        <div class="field"><label for="schoolId">学校 ID<span class="field-help">SCHOOL_ID</span></label><input id="schoolId" type="number" inputmode="numeric" min="0"></div>
+        <div class="field"><label for="maxWorkers">并发线程数<span class="field-help">MAX_WORKERS</span></label><input id="maxWorkers" type="number" inputmode="numeric" min="1"></div>
+        <div class="field field-wide"><label for="headers">请求头<span class="field-help">HEADERS · JSON</span></label><textarea id="headers" spellcheck="false"></textarea></div>
+      </div>
+
+      <div class="section-divider"></div>
+      <div class="card-head">
+        <div><p class="section-kicker">02 · Accounts</p><h2>账号与课程</h2><p class="section-copy">密码只写入本地密文，刷新页面不会再次显示；留空密码会保留原密码。</p></div>
+        <button class="secondary" type="button" onclick="addAccount()">添加账号</button>
+      </div>
+      <div id="accounts" class="account-list"></div>
+      <div class="actions">
+        <button class="primary" type="button" onclick="saveConfig()">保存配置</button>
+        <button class="primary" type="button" onclick="startProgram()">启动程序</button>
+        <button class="danger" type="button" onclick="stopProgram()">停止程序</button>
+      </div>
+      <div id="message" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card logs-card" aria-labelledby="logs-title">
+      <div class="card-head">
+        <div><p class="section-kicker">03 · Output</p><h2 id="logs-title">运行日志</h2><p class="section-copy">日志每秒刷新一次，最新内容会自动滚动到末尾。</p></div>
+        <div class="log-tools"><span id="logCount" class="log-count">0 行</span><button class="ghost" type="button" onclick="copyLogs()">复制</button></div>
+      </div>
+      <pre id="logs" aria-live="polite">正在加载...</pre>
+    </section>
   </div>
-  <label for="headers">HEADERS（JSON 对象）</label>
-  <textarea id="headers" spellcheck="false"></textarea>
-  <label for="accounts">ACCOUNTS（JSON 数组）</label>
-  <textarea id="accounts" spellcheck="false" placeholder='[{"number":"账号","password":"密码","course_ids":[1012365]}]'></textarea>
-  <div class="actions">
-    <button class="primary" onclick="saveConfig()">保存配置</button>
-    <button class="primary" onclick="startProgram()">启动程序</button>
-    <button class="danger" onclick="stopProgram()">停止程序</button>
-  </div>
-  <div id="message"></div>
-</div>
-<div class="card"><strong>运行日志</strong><pre id="logs">正在加载...</pre></div>
+  <p class="footer">服务监听 0.0.0.0 · 配置保存在当前项目目录</p>
+</main>
 <script>
 const $ = id => document.getElementById(id);
 function message(text, ok=false){$('message').textContent=text;$('message').className=ok?'ok':'error'}
-function fill(c){$('apiBase').value=c.API_BASE||'';$('schoolId').value=c.SCHOOL_ID??'';$('maxWorkers').value=c.MAX_WORKERS??'';$('headers').value=JSON.stringify(c.HEADERS||{},null,2);$('accounts').value=JSON.stringify(c.ACCOUNTS||[],null,2)}
+function syncEmptyState(){if(!$('accounts').querySelector('.account-row'))$('accounts').innerHTML='<div class="empty-state">暂未添加账号，点击右上角“添加账号”开始配置。</div>'}
+function addAccount(account={}){const empty=$('accounts').querySelector('.empty-state');if(empty)empty.remove();const row=document.createElement('div');row.className='account-row';row.innerHTML='<div class="account-grid"><div><label>账号</label><input class="account-number" autocomplete="username"></div><div><label>密码</label><input class="account-password" type="password" autocomplete="new-password"><div class="password-hint"></div></div><div><label>course_ids<span class="field-help">逗号分隔</span></label><input class="account-courses" placeholder="1012365, 1012305"></div><button class="remove-account" type="button">删除</button></div>';row.querySelector('.account-number').value=account.number||'';row.querySelector('.account-courses').value=(account.course_ids||[]).join(', ');row.querySelector('.password-hint').textContent=account.password_configured?'已设置，留空保持原密码':'未设置，保存时填写密码';row.querySelector('.remove-account').onclick=()=>{row.remove();syncEmptyState()};$('accounts').appendChild(row)}
+function fill(c){$('apiBase').value=c.API_BASE||'';$('schoolId').value=c.SCHOOL_ID??'';$('maxWorkers').value=c.MAX_WORKERS??'';$('headers').value=JSON.stringify(c.HEADERS||{},null,2);$('accounts').innerHTML='';(c.ACCOUNTS||[]).forEach(addAccount);syncEmptyState()}
 async function loadConfig(){const r=await fetch('/api/config');const d=await r.json();if(!r.ok)throw Error(d.error);fill(d)}
-function values(){let headers,accounts;try{headers=JSON.parse($('headers').value);accounts=JSON.parse($('accounts').value)}catch(e){throw Error('HEADERS 或 ACCOUNTS JSON 格式不正确')}return {API_BASE:$('apiBase').value,SCHOOL_ID:Number($('schoolId').value),MAX_WORKERS:Number($('maxWorkers').value),HEADERS:headers,ACCOUNTS:accounts}}
+function values(){let headers;try{headers=JSON.parse($('headers').value)}catch(e){throw Error('HEADERS JSON 格式不正确')}const rows=[...document.querySelectorAll('.account-row')];const accounts=rows.map((row,index)=>{const courseText=row.querySelector('.account-courses').value.trim();const courseIds=courseText?courseText.split(/[，,\s]+/).filter(Boolean).map(Number):[];if(courseIds.some(id=>!Number.isInteger(id)))throw Error('第 '+(index+1)+' 个账号的 course_ids 必须是整数');return {number:row.querySelector('.account-number').value,password:row.querySelector('.account-password').value,course_ids:courseIds}});return {API_BASE:$('apiBase').value,SCHOOL_ID:Number($('schoolId').value),MAX_WORKERS:Number($('maxWorkers').value),HEADERS:headers,ACCOUNTS:accounts}}
 async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const d=await r.json();if(!r.ok)throw Error(d.error||'请求失败');return d}
-async function saveConfig(){try{await post('/api/config',values());message('配置已保存',true)}catch(e){message(e.message)}}
-async function startProgram(){try{await post('/api/config',values());await post('/api/start');message('配置已保存，程序已启动',true)}catch(e){message(e.message)}}
-async function stopProgram(){try{await post('/api/stop');message('已发送停止请求',true)}catch(e){message(e.message)}}
-async function refreshLogs(){try{const r=await fetch('/api/logs');const d=await r.json();$('logs').textContent=d.logs||'(暂无日志)';$('logs').scrollTop=$('logs').scrollHeight}catch(e){$('logs').textContent='日志连接失败：'+e.message}}
+function setBusy(busy){document.querySelectorAll('button').forEach(button=>{button.disabled=busy})}
+async function saveConfig(){try{setBusy(true);await post('/api/config',values());message('配置已保存',true)}catch(e){message(e.message)}finally{setBusy(false)}}
+async function startProgram(){try{setBusy(true);await post('/api/config',values());await post('/api/start');message('配置已保存，程序已启动',true)}catch(e){message(e.message)}finally{setBusy(false)}}
+async function stopProgram(){try{setBusy(true);await post('/api/stop');message('已发送停止请求',true)}catch(e){message(e.message)}finally{setBusy(false)}}
+async function copyLogs(){try{await navigator.clipboard.writeText($('logs').textContent);message('日志已复制',true)}catch(e){message('当前浏览器不支持复制日志')}}
+function setStatus(running){const pill=$('serviceStatus');pill.className='status-pill '+(running?'running':'');$('serviceStatusText').textContent=running?'程序运行中':'程序已停止'}
+async function refreshLogs(){try{const r=await fetch('/api/logs');const d=await r.json();if(!r.ok)throw Error(d.error);const logs=d.logs||'';$('logs').textContent=logs||'(暂无日志)';$('logCount').textContent=(logs?logs.split('\n').length:0)+' 行';$('logs').scrollTop=$('logs').scrollHeight;setStatus(d.running)}catch(e){$('logs').textContent='日志连接失败：'+e.message;$('logCount').textContent='连接失败';$('serviceStatus').className='status-pill error';$('serviceStatusText').textContent='服务不可用'}}
 loadConfig().catch(e=>message(e.message));refreshLogs();setInterval(refreshLogs,1000);
 </script>
-</body></html>"""
+</body>
+</html>"""
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -211,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/":
                 self._send(200, HTML, "text/html")
             elif path == "/api/config":
-                self._send(200, _read_config())
+                self._send(200, _public_config())
             elif path == "/api/logs":
                 with _log_lock:
                     logs = "\n".join(_log_lines)
@@ -249,7 +386,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="启动本地配置与运行控制台")
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=11181)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"配置控制台：http://{args.host}:{args.port}")

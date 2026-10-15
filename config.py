@@ -1,7 +1,9 @@
 import base64
 import json
 from datetime import date
+from pathlib import Path
 import requests
+from cryptography.fernet import Fernet
 
 # 下面这段配置可通过 `python config_web.py` 在浏览器中编辑。
 # === FRONTEND CONFIG START ===
@@ -21,6 +23,23 @@ ACCOUNTS = [{'number': '', 'password': '', 'course_ids': [1012365, 1012305]}]
 # 线程数（每个课程的并发线程数）
 MAX_WORKERS = 15
 # === FRONTEND CONFIG END ===
+
+
+_SECRET_KEY_PATH = Path(__file__).with_name("config.secret.key")
+
+
+def _decrypt_password(encrypted_password):
+    if not encrypted_password:
+        return ""
+    if not _SECRET_KEY_PATH.exists():
+        raise RuntimeError(f"找不到密码密钥文件: {_SECRET_KEY_PATH}")
+    return Fernet(_SECRET_KEY_PATH.read_bytes().strip()).decrypt(encrypted_password.encode()).decode()
+
+
+# Web 配置页将密码保存为密文；主程序启动时仅在内存中解密供登录使用。
+for _account in ACCOUNTS:
+    if "password_encrypted" in _account:
+        _account["password"] = _decrypt_password(_account.pop("password_encrypted"))
 
 
 def login(number, password):
