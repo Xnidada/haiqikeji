@@ -3,33 +3,24 @@ import json
 from datetime import date
 import requests
 
-API_BASE = "https://swxy.haiqikeji.com/api/"
+# 下面这段配置可通过 `python config_web.py` 在浏览器中编辑。
+# === FRONTEND CONFIG START ===
+API_BASE = 'https://swxy.haiqikeji.com/api/'
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0",
-    "Content-Type": "application/json",
-    "Origin": "https://swxy.haiqikeji.com",
-}
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+               'Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0',
+ 'Content-Type': 'application/json',
+ 'Origin': 'https://swxy.haiqikeji.com'}
 
 # 学校ID
 SCHOOL_ID = 15
 
 # 账号列表（支持多个账号同时刷课）
-ACCOUNTS = [
-    {
-        "number": "",
-        "password": "",
-        "course_ids": [1012365,1012305],
-    },
-    # {
-    #     "number": "",
-    #     "password": "",
-    #     "course_ids": [1012366],
-    # },
-]
+ACCOUNTS = [{'number': '', 'password': '', 'course_ids': [1012365, 1012305]}]
 
 # 线程数（每个课程的并发线程数）
 MAX_WORKERS = 15
+# === FRONTEND CONFIG END ===
 
 
 def login(number, password):
