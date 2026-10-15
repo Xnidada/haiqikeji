@@ -248,7 +248,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="启动本地配置与运行控制台")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
